@@ -1,37 +1,19 @@
-require("dotenv").config();
-const fs = require("fs");
-const path = require("path");
-const {
-  Bot,
-  GrammyError,
-  HttpError,
-  Keyboard,
-  InlineKeyboard,
-  session,
-} = require("grammy");
-const sqlite3 = require("sqlite3").verbose();
-const { open } = require("sqlite");
-const { logger } = require("./utils/logger");
-const {
-  updateUserData,
-  recordUserInteraction,
-  recordSocialNetworkRequest,
-  recordPromoCodeRequest,
-  isAdmin,
-  createKeyboard,
-  getUsageStats,
-  getMessages,
-} = require("./utils/helpers");
-const { socialNetworks, promoCodes } = require("./utils/buttons");
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { Bot, GrammyError, HttpError, Keyboard, InlineKeyboard, session } = require('grammy');
+const sqlite3 = require('sqlite3').verbose();
+const { open } = require('sqlite');
+const { logger } = require('./utils/logger');
+const { updateUserData, recordUserInteraction, isAdmin, getUsageStats, getMessages } = require('./utils/helpers');
 
 const bot = new Bot(process.env.BOT_API_KEY);
 
-bot.use(
-  session({
-    initial: () => ({}),
-  })
-);
+bot.use(session({
+  initial: () => ({})
+}));
 
+// Создание таблиц в базе данных
 async function createTables(db) {
   await db.exec(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
@@ -43,20 +25,6 @@ async function createTables(db) {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     userId INTEGER,
     interactionTime TIMESTAMP
-  )`);
-
-  await db.exec(`CREATE TABLE IF NOT EXISTS socialNetworkRequests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId INTEGER,
-    networkName TEXT,
-    requestTime TIMESTAMP
-  )`);
-
-  await db.exec(`CREATE TABLE IF NOT EXISTS promoCodeRequests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    userId INTEGER,
-    promoName TEXT,
-    requestTime TIMESTAMP
   )`);
 
   await db.exec(`CREATE TABLE IF NOT EXISTS messages (
@@ -71,207 +39,127 @@ async function createTables(db) {
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  logger.info("Tables created or already exist");
+  logger.info('Tables created or already exist');
 }
 
+// Инициализация базы данных
 let db;
 (async () => {
-  const dbPath = "./userData.db";
-
+  const dbPath = './userData.db';
   const dbExists = fs.existsSync(dbPath);
 
   db = await open({
     filename: dbPath,
-    driver: sqlite3.Database,
+    driver: sqlite3.Database
   });
 
   if (!dbExists) {
     await createTables(db);
   }
 
-  logger.info("Database initialized and connection established");
+  logger.info('Database initialized and connection established');
 })();
 
-bot.command("start", async (ctx) => {
+// Команда /start
+bot.command('start', async (ctx) => {
   logger.info(`User ${ctx.from.id} started the bot`);
   await updateUserData(db, ctx.from.id);
-  const startKeyboard = new Keyboard().text("🙋‍♂️ Предложка (выпускной)").row();
-  await ctx.reply("Привет! Я бот помощник для паролели 11 классов");
-  await ctx.reply(
-    "🙋‍♂️ Предложка - тут ты можешь направить мне сообщение для выпускного"
-  );
-  await ctx.reply(
-    "🟢 Предложка поддерживает отправку сообщений, фото, видео, аудио/видеосообщений, файлов"
-  );
-  await ctx.reply("📲 Социальные сети - я во всех социальных сетях");
-  await ctx.reply("🔥 Промокоды и скидки - промокоды и скидки для подписчиков");
-  await ctx.reply("С чего начнем? Выбирай 👇", {
+  const startKeyboard = new Keyboard()
+    .text('📁 Отправить файл')
+    .row();
+  await ctx.reply('Привет! Я бот для сбора файлов к выпускному!');
+  await ctx.reply('📁 Отправить файл — тут вы можете отправить файлы для выпускного альбома или презентации.');
+  await ctx.reply('🟢 Поддерживаются фото, видео, аудио/видеосообщения, документы.');
+  await ctx.reply('Нажмите кнопку ниже, чтобы отправить файл 👇', {
     reply_markup: startKeyboard,
   });
 });
 
-bot.command("admin", async (ctx) => {
-  if (
-    isAdmin(ctx.from.id, process.env.ADMIN_ID) ||
-    isAdmin(ctx.from.id, process.env.ADMIN_ID_2)
-  ) {
+// Команда /admin (для администраторов)
+bot.command('admin', async (ctx) => {
+  if (isAdmin(ctx.from.id, [process.env.ADMIN_ID, process.env.ADMIN_ID2])) {
     const stats = await getUsageStats(db);
-    let response = `Статистика использования бота:\nВсего запусков: ${stats.totalStarts}\nИспользовали бота сегодня: ${stats.todayStarts}\nВсего взаимодействий: ${stats.totalInteractions}\nВзаимодействий сегодня: ${stats.todayInteractions}\n\n`;
-
-    response += "Запросы на социальные сети:\n";
-    for (const { networkName, total } of stats.totalSocialNetworkRequests) {
-      const today =
-        stats.todaySocialNetworkRequests.find(
-          (n) => n.networkName === networkName
-        )?.today || 0;
-      response += `${networkName} - Всего: ${total}, Сегодня: ${today}\n`;
-    }
-
-    response += "\nЗапросы на промокоды:\n";
-    for (const { promoName, total } of stats.totalPromoCodeRequests) {
-      const today =
-        stats.todayPromoCodeRequests.find((p) => p.promoName === promoName)
-          ?.today || 0;
-      response += `${promoName} - Всего: ${total}, Сегодня: ${today}\n`;
-    }
-
+    const response = `Статистика использования бота для выпускного:\nВсего запусков: ${stats.totalStarts}\nИспользовали бота сегодня: ${stats.todayStarts}\nВсего взаимодействий: ${stats.totalInteractions}\nВзаимодействий сегодня: ${stats.todayInteractions}`;
     await ctx.reply(response);
   } else {
-    await ctx.reply("У вас нет прав администратора!");
+    await ctx.reply('У вас нет прав администратора!');
   }
 });
 
+// Логирование взаимодействий
 bot.use(async (ctx, next) => {
   await recordUserInteraction(db, ctx.from.id);
   return next();
 });
 
-function handleButtonClicks(items, recordRequest) {
-  items.forEach((item) => {
-    bot.hears(item.name, async (ctx) => {
-      await recordUserInteraction(db, ctx.from.id);
-      await recordRequest(db, ctx.from.id, item.name);
-      let message = "";
-      if (item.type === "social") {
-        message = `Вот ссылка на ${item.name}: ${item.url}`;
-      } else if (item.type === "promo") {
-        message = `Вот ссылка на ${item.name}: ${item.url}\n\nПромокод: ${item.code}\n\nОписание: ${item.description}`;
-      }
-      await ctx.reply(message);
-    });
-  });
-}
-
-handleButtonClicks(socialNetworks, recordSocialNetworkRequest);
-handleButtonClicks(promoCodes, recordPromoCodeRequest);
-
-bot.hears("📲 Социальные сети", async (ctx) => {
-  const socialKeyboard = createKeyboard(socialNetworks);
-  await ctx.reply("Выберите социальную сеть:", {
-    reply_markup: socialKeyboard,
-  });
-});
-
-bot.hears("🔥 Промокоды и скидки", async (ctx) => {
-  const promoKeyboard = createKeyboard(promoCodes);
-  await ctx.reply("Выберите категорию промокодов и скидок:", {
-    reply_markup: promoKeyboard,
-  });
-});
-
-bot.hears("Назад ↩️", async (ctx) => {
-  const startKeyboard = new Keyboard()
-    .text("🙋‍♂️ Предложка")
-    .row()
-    .text("📲 Социальные сети")
-    .row()
-    .text("🔥 Промокоды и скидки")
-    .row();
-  await ctx.reply("Выберите действие:", {
-    reply_markup: startKeyboard,
-  });
-});
-
 let suggestionClicked = {};
 let unreadMessagesCount = 0;
 
-bot.hears("🙋‍♂️ Предложка", async (ctx) => {
-  if (
-    isAdmin(ctx.from.id, process.env.ADMIN_ID) ||
-    isAdmin(ctx.from.id, process.env.ADMIN_ID_2)
-  ) {
-    console.log("Admin accessed suggestions");
+// Обработка нажатия кнопки "📁 Отправить файл"
+bot.hears('📁 Отправить файл', async (ctx) => {
+  if (isAdmin(ctx.from.id, [process.env.ADMIN_ID, process.env.ADMIN_ID2])) {
+    console.log('Admin accessed file submissions');
     const adminKeyboard = new Keyboard()
-      .text("Все полученные сообщения")
+      .text('Все полученные файлы')
       .row()
-      .text("Сообщения без ответа")
+      .text('Файлы без ответа')
       .row()
-      .text("Назад ↩️")
+      .text('Назад ↩️')
       .row();
-    await ctx.reply("Выберите действие:", {
+    await ctx.reply('Выберите действие:', {
       reply_markup: adminKeyboard,
     });
     suggestionClicked[ctx.from.id] = true;
   } else {
     suggestionClicked[ctx.from.id] = true;
-    await ctx.reply(
-      "Опишите ваше предложение или сообщение, которое вы хотели бы отправить автору бота."
-    );
+    await ctx.reply('Отправьте файл, который вы хотите поделиться для выпускного альбома или презентации.');
   }
 });
 
-bot.hears("Все полученные сообщения", async (ctx) => {
-  if (
-    !isAdmin(ctx.from.id, process.env.ADMIN_ID) ||
-    !isAdmin(ctx.from.id, process.env.ADMIN_ID_2)
-  )
-    return;
+// Показать все полученные файлы (для админов)
+bot.hears('Все полученные файлы', async (ctx) => {
+  if (!isAdmin(ctx.from.id, [process.env.ADMIN_ID, process.env.ADMIN_ID2])) return;
   const messages = await getMessages(db);
   if (messages.length === 0) {
-    await ctx.reply("Сообщений нет.");
+    await ctx.reply('Файлов нет.');
   } else {
     for (const message of messages) {
-      const inlineKeyboard = new InlineKeyboard().text(
-        "Ответить",
-        `reply-${message.id}`
-      );
-      const userInfo = `Сообщение от ${message.first_name} (@${message.username}, ID: ${message.userId})`;
+      const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply-${message.id}`);
+      const userInfo = `Файл от ${message.first_name} (@${message.username}, ID: ${message.userId})`;
 
       if (message.message) {
-        await ctx.reply(`${userInfo}: ${message.message}`, {
-          reply_markup: inlineKeyboard,
-        });
+        await ctx.reply(`${userInfo}: ${message.message}`, { reply_markup: inlineKeyboard });
       } else {
         const mediaType = message.media_type;
-        if (mediaType === "photo") {
+        if (mediaType === 'photo') {
           await ctx.api.sendPhoto(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "video") {
+        } else if (mediaType === 'video') {
           await ctx.api.sendVideo(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "document") {
+        } else if (mediaType === 'document') {
           await ctx.api.sendDocument(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "audio") {
+        } else if (mediaType === 'audio') {
           await ctx.api.sendAudio(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "voice") {
+        } else if (mediaType === 'voice') {
           await ctx.api.sendVoice(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "video_note") {
+        } else if (mediaType === 'video_note') {
           await ctx.api.sendVideoNote(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
         }
       }
@@ -279,60 +167,51 @@ bot.hears("Все полученные сообщения", async (ctx) => {
   }
 });
 
-bot.hears("Сообщения без ответа", async (ctx) => {
-  if (
-    !isAdmin(ctx.from.id, process.env.ADMIN_ID) ||
-    !isAdmin(ctx.from.id, process.env.ADMIN_ID_2)
-  )
-    return;
+// Показать файлы без ответа (для админов)
+bot.hears('Файлы без ответа', async (ctx) => {
+  if (!isAdmin(ctx.from.id, [process.env.ADMIN_ID, process.env.ADMIN_ID2])) return;
 
   const messages = await getMessages(db, 0);
-
   if (messages.length === 0) {
-    await ctx.reply("Сообщений без ответа нет.");
+    await ctx.reply('Файлов без ответа нет.');
   } else {
     for (const message of messages) {
-      const inlineKeyboard = new InlineKeyboard().text(
-        "Ответить",
-        `reply-${message.id}`
-      );
-      const userInfo = `Сообщение от ${message.first_name} (@${message.username}, ID: ${message.userId})`;
+      const inlineKeyboard = new InlineKeyboard().text('Ответить', `reply-${message.id}`);
+      const userInfo = `Файл от ${message.first_name} (@${message.username}, ID: ${message.userId})`;
 
       if (message.message) {
-        await ctx.reply(`${userInfo}: ${message.message}`, {
-          reply_markup: inlineKeyboard,
-        });
+        await ctx.reply(`${userInfo}: ${message.message}`, { reply_markup: inlineKeyboard });
       } else {
         const mediaType = message.media_type;
-        if (mediaType === "photo") {
+        if (mediaType === 'photo') {
           await ctx.api.sendPhoto(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "video") {
+        } else if (mediaType === 'video') {
           await ctx.api.sendVideo(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "document") {
+        } else if (mediaType === 'document') {
           await ctx.api.sendDocument(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "audio") {
+        } else if (mediaType === 'audio') {
           await ctx.api.sendAudio(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "voice") {
+        } else if (mediaType === 'voice') {
           await ctx.api.sendVoice(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
-        } else if (mediaType === "video_note") {
+        } else if (mediaType === 'video_note') {
           await ctx.api.sendVideoNote(ctx.chat.id, message.media_id, {
             caption: userInfo,
-            reply_markup: inlineKeyboard,
+            reply_markup: inlineKeyboard
           });
         }
       }
@@ -340,61 +219,46 @@ bot.hears("Сообщения без ответа", async (ctx) => {
   }
 });
 
-bot.on("message", async (ctx) => {
-  const authorId = process.env.ADMIN_ID;
+// Кнопка "Назад"
+bot.hears('Назад ↩️', async (ctx) => {
+  const startKeyboard = new Keyboard()
+    .text('📁 Отправить файл')
+    .row();
+  await ctx.reply('Выберите действие:', {
+    reply_markup: startKeyboard,
+  });
+});
+
+// Обработка сообщений от пользователей
+bot.on('message', async (ctx) => {
+  const adminIds = [process.env.ADMIN_ID, process.env.ADMIN_ID2];
   const fromId = ctx.from.id.toString();
-  const authorId2 = process.env.ADMIN_ID_2;
 
-  console.log(`unreadMessagesCount: ${unreadMessagesCount}`);
-  console.log(`fromId: ${fromId}, authorId: ${authorId} ${authorId2}`);
-
-  if (
-    (fromId === authorId || fromId === authorId2) &&
-    ctx.session.replyToUser
-  ) {
+  // Ответ администратора
+  if (adminIds.includes(fromId) && ctx.session.replyToUser) {
     const targetMessageId = ctx.session.replyToMessageId;
 
-    await db.run(`UPDATE messages SET replied = 1 WHERE id = ?`, [
-      targetMessageId,
-    ]);
-    await ctx.api.sendMessage(
-      ctx.session.replyToUser,
-      "На ваше сообщение получен ответ от админа канала."
-    );
+    await db.run(`UPDATE messages SET replied = 1 WHERE id = ?`, [targetMessageId]);
+    await ctx.api.sendMessage(ctx.session.replyToUser, 'На ваше сообщение получен ответ от организатора выпускного.');
 
     if (ctx.message.text) {
       await ctx.api.sendMessage(ctx.session.replyToUser, ctx.message.text);
     } else if (ctx.message.voice) {
-      await ctx.api.sendVoice(
-        ctx.session.replyToUser,
-        ctx.message.voice.file_id
-      );
+      await ctx.api.sendVoice(ctx.session.replyToUser, ctx.message.voice.file_id);
     } else if (ctx.message.video) {
-      await ctx.api.sendVideo(
-        ctx.session.replyToUser,
-        ctx.message.video.file_id
-      );
+      await ctx.api.sendVideo(ctx.session.replyToUser, ctx.message.video.file_id);
     } else if (ctx.message.photo) {
       const photo = ctx.message.photo.pop();
       await ctx.api.sendPhoto(ctx.session.replyToUser, photo.file_id);
     } else if (ctx.message.audio) {
-      await ctx.api.sendAudio(
-        ctx.session.replyToUser,
-        ctx.message.audio.file_id
-      );
+      await ctx.api.sendAudio(ctx.session.replyToUser, ctx.message.audio.file_id);
     } else if (ctx.message.document) {
-      await ctx.api.sendDocument(
-        ctx.session.replyToUser,
-        ctx.message.document.file_id
-      );
+      await ctx.api.sendDocument(ctx.session.replyToUser, ctx.message.document.file_id);
     } else if (ctx.message.video_note) {
-      await ctx.api.sendVideoNote(
-        ctx.session.replyToUser,
-        ctx.message.video_note.file_id
-      );
+      await ctx.api.sendVideoNote(ctx.session.replyToUser, ctx.message.video_note.file_id);
     }
 
-    await ctx.reply("Ответ направлен.");
+    await ctx.reply('Ответ направлен.');
     ctx.session.replyToUser = undefined;
     ctx.session.replyToMessageId = undefined;
 
@@ -404,112 +268,83 @@ bot.on("message", async (ctx) => {
     return;
   }
 
+  // Обработка отправки файла пользователем
   if (suggestionClicked[fromId]) {
-    console.log("User sent a suggestion.");
-    let mediaType = "";
-    let mediaId = "";
+    console.log('User sent a file.');
+    let mediaType = '';
+    let mediaId = '';
 
     if (ctx.message.text) {
-      await db.run(
-        `INSERT INTO messages (userId, message, first_name, username) VALUES (?, ?, ?, ?)`,
-        [ctx.from.id, ctx.message.text, ctx.from.first_name, ctx.from.username]
-      );
+      await db.run(`INSERT INTO messages (userId, message, first_name, username) VALUES (?, ?, ?, ?)`, 
+                   [ctx.from.id, ctx.message.text, ctx.from.first_name, ctx.from.username]);
     } else {
       if (ctx.message.photo) {
         const photo = ctx.message.photo.pop();
-        mediaType = "photo";
+        mediaType = 'photo';
         mediaId = photo.file_id;
       } else if (ctx.message.video) {
-        mediaType = "video";
+        mediaType = 'video';
         mediaId = ctx.message.video.file_id;
       } else if (ctx.message.document) {
-        mediaType = "document";
+        mediaType = 'document';
         mediaId = ctx.message.document.file_id;
       } else if (ctx.message.audio) {
-        mediaType = "audio";
+        mediaType = 'audio';
         mediaId = ctx.message.audio.file_id;
       } else if (ctx.message.voice) {
-        mediaType = "voice";
+        mediaType = 'voice';
         mediaId = ctx.message.voice.file_id;
       } else if (ctx.message.video_note) {
-        mediaType = "video_note";
+        mediaType = 'video_note';
         mediaId = ctx.message.video_note.file_id;
       }
 
-      await db.run(
-        `INSERT INTO messages (userId, media_type, media_id, first_name, username) VALUES (?, ?, ?, ?, ?)`,
-        [
-          ctx.from.id,
-          mediaType,
-          mediaId,
-          ctx.from.first_name,
-          ctx.from.username,
-        ]
-      );
+      await db.run(`INSERT INTO messages (userId, media_type, media_id, first_name, username) VALUES (?, ?, ?, ?, ?)`,
+                   [ctx.from.id, mediaType, mediaId, ctx.from.first_name, ctx.from.username]);
     }
 
-    await ctx.reply("Ваше сообщение успешно отправлено автору бота");
+    await ctx.reply('Ваш файл успешно отправлен организаторам выпускного.');
     suggestionClicked[fromId] = false;
 
     unreadMessagesCount++;
-    console.log(
-      `Admin notified, new unreadMessagesCount: ${unreadMessagesCount}`
-    );
-    await ctx.api.sendMessage(
-      authorId,
-      `Вам пришло сообщение. Неотвеченных сообщений: ${unreadMessagesCount}`
-    );
-    await ctx.api.sendMessage(
-      authorId2,
-      `Вам пришло сообщение. Неотвеченных сообщений: ${unreadMessagesCount}`
-    );
+    console.log(`Admin notified, new unreadMessagesCount: ${unreadMessagesCount}`);
+    for (const adminId of adminIds) {
+      await ctx.api.sendMessage(adminId, `Получен новый файл для выпускного. Неотвеченных сообщений: ${unreadMessagesCount}`);
+    }
   } else {
-    if (fromId !== authorId || fromId !== authorId2) {
-      console.log("User is not admin and did not click suggestion.");
-      await ctx.reply(
-        'Пожалуйста, сначала нажмите кнопку "Предложка" для отправки сообщения автору канала!'
-      );
+    if (!adminIds.includes(fromId)) {
+      console.log('User is not admin and did not click file submission.');
+      await ctx.reply('Пожалуйста, сначала нажмите кнопку "📁 Отправить файл" для отправки файла организаторам выпускного!');
     } else {
-      console.log("Admin received a new message.");
+      console.log('Admin received a new file.');
       unreadMessagesCount++;
-      console.log(
-        `Admin notified, new unreadMessagesCount: ${unreadMessagesCount}`
-      );
-      await ctx.api.sendMessage(
-        authorId,
-        `Вам пришло сообщение. Неотвеченных сообщений: ${unreadMessagesCount}`
-      );
-      await ctx.api.sendMessage(
-        authorId2,
-        `Вам пришло сообщение. Неотвеченных сообщений: ${unreadMessagesCount}`
-      );
+      console.log(`Admin notified, new unreadMessagesCount: ${unreadMessagesCount}`);
+      for (const adminId of adminIds) {
+        await ctx.api.sendMessage(adminId, `Получен новый файл для выпускного. Неотвеченных сообщений: ${unreadMessagesCount}`);
+      }
     }
   }
 });
 
+// Обработка ответа администратора через inline-кнопку
 bot.callbackQuery(/^reply-(\d+)$/, async (ctx) => {
   const targetMessageId = ctx.match[1];
-  const targetMessage = await db.get(
-    "SELECT userId FROM messages WHERE id = ?",
-    [targetMessageId]
-  );
+  const targetMessage = await db.get('SELECT userId FROM messages WHERE id = ?', [targetMessageId]);
 
   if (targetMessage) {
     ctx.session.replyToUser = targetMessage.userId;
     ctx.session.replyToMessageId = targetMessageId;
-    await ctx.answerCallbackQuery(
-      "Вы можете ответить текстом, аудио, видео или фото."
-    );
+    await ctx.answerCallbackQuery('Вы можете ответить текстом, аудио, видео или фото.');
   } else {
-    await ctx.answerCallbackQuery("Сообщение не найдено.", {
-      show_alert: true,
-    });
+    await ctx.answerCallbackQuery('Сообщение не найдено.', { show_alert: true });
   }
 });
 
+// Обработка ошибок
 bot.catch((err) => {
   const ctx = err.ctx;
   logger.error(`Error while handling update ${ctx.update.update_id}:`, err);
 });
 
+// Запуск бота
 bot.start();
