@@ -82,7 +82,7 @@ bot.command('admin', async (ctx) => {
     const response = `Статистика использования бота для выпускного:\nВсего запусков: ${stats.totalStarts}\nИспользовали бота сегодня: ${stats.todayStarts}\nВсего взаимодействий: ${stats.totalInteractions}\nВзаимодействий сегодня: ${stats.todayInteractions}`;
     await ctx.reply(response);
   } else {
-    await ctx.reply('У вас нет прав администратора!');
+    await ctx.reply('У вас нет прав администратора!' + ctx.from.id.toString());
   }
 });
 
